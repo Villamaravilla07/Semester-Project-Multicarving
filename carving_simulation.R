@@ -51,13 +51,29 @@ SNR <- 1.713766 # value created for Toeplitz 0.6
 sigma <- 2
 y <- y.true + sigma * rnorm(n)
 
-
 #Here we run the simulation with beta_Carve^Drysdale
-carve_D <-carve.linear(x,y,fraq,sigma=sigma)
-split <- carve_D$split
-beta_tmp <- carve_D$beta
-lambda <- carve_D$lambda
+# carve_D <-carve.linear(x,y,fraq,sigma=sigma)
+# split <- carve_D$split
+# beta_tmp <- carve_D$beta
+# lambda <- carve_D$lambda
 
-#We get some warnings for hamiltonian sampler
-carve_C <- carve.lasso(X = x, y = y, ind = split, beta = beta_tmp, tol.beta = 0, sigma = sigma,
-                             lambda = lambda, intercept = FALSE,selected=TRUE, verbose = TRUE)
+#As the carve.lasso applied after onesplit.select gives alot of "not fulfilled whitening constraints" errors, I tried to get
+# the p-values from carve.lasso through calling multi.carve with B=1, no aggregation, no skipping variables and no estimation of sigma,
+#as well as no FWER correction
+args.model.selector = list(intercept = FALSE, standardize = FALSE)
+carve_C <- multi.carve(x = x, y = y, B = 1, fraction =fraq, FWER = FALSE, args.model.selector = args.model.selector,
+                       args.lasso.inference = list(sigma=sigma), skip.variables = FALSE, return.nonaggr = TRUE,
+                       split.pval = FALSE, return.selmodels = TRUE)
+
+pvals_C <- carve_C$pvals.nonaggr
+sel.models <- carve_C$sel.models
+sel.models.ind <- which(sel.models == TRUE)
+beta.select <- as.vector(carve_C$beta)
+lambda.select <- as.numeric(carve_C$lambda)
+split.select <- as.vector(carve_C$split)
+
+carve_D <-carve.linear(x,y,split = split.select, beta = beta.select, lambda = lambda.select,fraction = fraq,sigma=sigma)
+
+#We get some warnings for hamiltonian sampler and unfortunately still very often not fulfilled whitening constraints for most of the seeds
+#carve_C <- carve.lasso(X = x, y = y, ind = split, beta = beta_tmp, tol.beta = 0, sigma = sigma,
+#                           lambda = lambda, intercept = FALSE, selected=TRUE, verbose = TRUE)

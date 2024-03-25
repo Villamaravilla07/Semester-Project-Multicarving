@@ -1,14 +1,12 @@
-#splits the data, performs selection on one split, calculates p-values of carving estimator as in Drydale's paper
 
-set.seed(42)
+#set.seed(42)
 #Set the seed to have replicabiltiy while debugging
 
-carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(intercept = FALSE),
+carve.linear <- function(x, y, split, beta, lambda, fraction = 0.9, args.model.selector = list(intercept = FALSE),
                          sigma=sigma){
   
   #Normalize x and y before starting:
   y<-y-mean(y)
-
   for (j in dim(x)[2]){
     xjbar<-mean(x[,j])
     #Calculate the variance with 1/n in the denominator as per Bühlmann's HDS lecture:
@@ -18,13 +16,6 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
     }
   }
   
-  #1-split-select from Christoph's carve.Lasso:
-  #Splits data and selects active variables while checking constraints.
-  split.select.list <- split.select(x,y,fraction = fraction)
-  beta <- split.select.list$beta
-  #beta <- beta[-1] #exclude intercept for now
-  lambda <- split.select.list$lambda
-  split <- split.select.list$split
   n <- length(y)
   p <- length(beta)
   n.a <- length(split)
@@ -42,7 +33,7 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
   chosen <-  which(abs(beta) > 0) # selected variables
   s <- length(chosen)
   b.signs <- sign(beta[chosen])
-
+  
   if (s == 0)
     stop("0 variables were chosen by the Lasso")
   
@@ -54,12 +45,22 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
   x_Ma <- x.a[, -chosen]#(n.a x (p-s))
   x_Mb <- x.b[, -chosen]
   
+  #Check for well-definedness of moore penrose inverses, and hence also of beta_carve_D, this still needs implementation, as
+  #isSingular does not exist in that way as i want it, maybe use the library matrixcalc and is.singular.matrix
+  # if (isSingular(t(x.Ma)%*%X.Ma) && isSingular(t(x.Mb)%*%X.Mb)){
+  #   stop("Both t(x.Ma)%*%X.Ma and t(x.Mb)%*%X.Mb arenot invertible")
+  # }
+  # if (isSingular(t(x.Ma)%*%X.Ma)){
+  #   stop("t(x.Ma)%*%X.Ma) is not invertible")
+  # }
+  # if (isSingular(t(x.Ma)%*%X.Ma)){
+  #   stop("t(x.Mb)%*%X.Mb) is not invertible")
+  # }
   
   #compute the moore penrose inverse of active variables in both splits
   x.Ma.i <- ginv(x.Ma)#(s x na)
   x.Ma.ti <- ginv(t(x.Ma))
   x.Mb.i <- ginv(x.Mb)
-  
   #compute the projection matrix onto active columns
   p.Ma <- x.Ma %*% x.Ma.i#(n.a x n.a)
   
@@ -82,7 +83,7 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
   A <- rbind(A.0, A.1)# (2p-s) x n.a
   b <- rbind(b.0,b.1)
   
-
+  
   
   #Following a mix of Lee (https://github.com/selective-inference/R-software/blob/master/selectiveInference/R/funs.fixed.R) from line 231
   #and Drysdale (https://github.com/ErikinBC/sntn/blob/main/sntn/_lasso.py) from line 195
@@ -114,7 +115,7 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
     }
     norm_consts[i] <- v.i.norm
   }
-    
+  
   #Scale back, this is what Drysdale does, not sure if necessary
   eta_var <- sigma * (norm_consts^2)
   vlo <- vlo * norm_consts
@@ -127,7 +128,7 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
   #tau.1 <- sigma
   #tau.2 <- eta_var
   
-
+  
   #REMARK: Drysdale sets theta1 = theta2 = beta_null for the sntn dist, where beta_null is the assumed beta under the null, 
   #so in our case an all zeros vector of dimension beta_carve_D, for reference: see parameters of run_inference in _lasso.py
   theta.1 <- rep(0,s)
@@ -135,23 +136,24 @@ carve.linear <- function(x, y, fraction = 0.9, args.model.selector = list(interc
   
   #y~N(x beta^0, tau^2 I_n)
   tau.M=sigma
-
+  
   #Defined beta^M=0 for testing the null hypothesis
   beta.M=rep(0,s)  
-
-
-  pvals<-1-SNTN_CDF(z=beta_carve_D,
-           mu1=theta.1,
-           tau1=diag(tau.M*solve(t(x.Mb)%*%x.Mb)),
-           mu2=theta.2,
-           tau2=diag(tau.M*solve(t(x.Ma)%*%x.Ma)),
-           a=vlo,
-           b=vup,
-           c1=c1,
-           c2=c2)
   
   
-  return(list(pvals = pvals,split = split, beta = beta, lambda = lambda))
+  pv<-1-SNTN_CDF(z=beta_carve_D,
+                 mu1=theta.1,
+                 tau1=diag(tau.M*solve(t(x.Mb)%*%x.Mb)),
+                 mu2=theta.2,
+                 tau2=diag(tau.M*solve(t(x.Ma)%*%x.Ma)),
+                 a=vlo,
+                 b=vup,
+                 c1=c1,
+                 c2=c2)
+  pvals <- rep(1,p)
+  pvals[chosen] <- pv
+  
+  return(pvals)
 }
 
 
